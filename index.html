@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SpendMax — Rewards Optimizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .glow-orange { box-shadow: 0 0 18px rgba(251,146,60,0.35); }
+    .glow-blue   { box-shadow: 0 0 12px rgba(59,130,246,0.2); }
+    .glow-amber  { box-shadow: 0 0 16px rgba(245,158,11,0.2); }
+    .tile-hover  { transition: transform .18s, box-shadow .18s; }
+    .tile-hover:hover { transform: scale(1.03); }
+  </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+
+<!-- NAV -->
+<nav class="bg-slate-900 border-b border-slate-800 px-6 py-4 sticky top-0 z-50">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <div class="flex items-center gap-1">
+      <span class="text-xl font-bold text-white">Spend</span>
+      <span class="text-xl font-bold text-blue-400">Max</span>
+      <span class="ml-2 text-[10px] font-semibold text-slate-500 tracking-widest uppercase">v2.0</span>
+    </div>
+    <div class="flex gap-1" id="nav-links">
+      <button data-route=""        class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Dashboard</button>
+      <button data-route="wallet"  class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Wallet</button>
+      <button data-route="discover"class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">Discover</button>
+    </div>
+  </div>
+</nav>
+
+<main class="max-w-6xl mx-auto px-6 py-8" id="app"></main>
+
+<script>
+// ─── DATA ────────────────────────────────────────────────────────────────────
+
+const Q = 2; // current quarter (Q2 2026)
+const SPEND = 5000; // assumed annual spend per category ($)
+
+const CATEGORIES = [
+  { id:'dining',        name:'Dining',           icon:'🍽️' },
+  { id:'groceries',     name:'Groceries',         icon:'🛒' },
+  { id:'gas',           name:'Gas',               icon:'⛽' },
+  { id:'travel',        name:'Travel',            icon:'✈️' },
+  { id:'streaming',     name:'Streaming',         icon:'📺' },
+  { id:'transit',       name:'Transit',           icon:'🚌' },
+  { id:'shopping',      name:'Online Shopping',   icon:'🛍️' },
+  { id:'entertainment', name:'Entertainment',     icon:'🎭' },
+];
+
+const CARDS = [
+  { id:'csp',          name:'Sapphire Preferred',  issuer:'Chase',        color:'#004b87', base:1.25, fee:95,  bonus:750, promoted:true,
+    rates:[{c:'dining',r:3.75,t:'p'},{c:'groceries',r:2.5,t:'p'},{c:'travel',r:2.5,t:'p'},{c:'streaming',r:2.5,t:'p'},{c:'transit',r:2.5,t:'p'},{c:'entertainment',r:2.5,t:'p'}] },
+  { id:'cff',          name:'Freedom Flex',         issuer:'Chase',        color:'#1a6bad', base:1,    fee:0,   bonus:200, promoted:false,
+    rates:[{c:'dining',r:3,t:'p'},{c:'gas',r:5,t:'r',q:[1]},{c:'shopping',r:5,t:'r',q:[2]},{c:'groceries',r:5,t:'r',q:[2]},{c:'gas',r:5,t:'r',q:[3]},{c:'shopping',r:5,t:'r',q:[4]}] },
+  { id:'amex-gold',    name:'Gold Card',            issuer:'Amex',         color:'#b8a55a', base:1.5,  fee:250, bonus:250, promoted:true,
+    rates:[{c:'dining',r:6,t:'p'},{c:'groceries',r:6,t:'p'},{c:'travel',r:4.5,t:'p'}] },
+  { id:'amex-bcp',     name:'Blue Cash Preferred',  issuer:'Amex',         color:'#016fd0', base:1,    fee:95,  bonus:350, promoted:false,
+    rates:[{c:'groceries',r:6,t:'p'},{c:'streaming',r:6,t:'p'},{c:'gas',r:3,t:'p'},{c:'transit',r:3,t:'p'}] },
+  { id:'citi-dc',      name:'Double Cash',          issuer:'Citi',         color:'#003b8e', base:2,    fee:0,   bonus:200, promoted:false, rates:[] },
+  { id:'discover-it',  name:'it Cash Back',         issuer:'Discover',     color:'#f97316', base:1,    fee:0,   bonus:150, promoted:false,
+    rates:[{c:'gas',r:5,t:'r',q:[1]},{c:'dining',r:5,t:'r',q:[2]},{c:'shopping',r:5,t:'r',q:[3,4]}] },
+  { id:'c1-venturex',  name:'Venture X',            issuer:'Capital One',  color:'#c31920', base:2,    fee:395, bonus:750, promoted:true,
+    rates:[{c:'travel',r:10,t:'p'},{c:'transit',r:5,t:'p'}] },
+  { id:'wf-activecash',name:'Active Cash',          issuer:'Wells Fargo',  color:'#b8341b', base:2,    fee:0,   bonus:200, promoted:false, rates:[] },
+];
+
+const LTOS = [
+  { id:'lto-1', card:'amex-gold',    cat:'dining',   rate:10, end:'2026-06-30', merchant:'Starbucks', desc:'10% back at Starbucks (Amex Offer — must activate)' },
+  { id:'lto-2', card:'csp',          cat:'dining',   rate:8,  end:'2026-06-15', merchant:'Chipotle',  desc:'8% back at Chipotle (Chase Offer — must activate)' },
+  { id:'lto-3', card:'amex-bcp',     cat:'shopping', rate:15, end:'2026-05-31', merchant:'Nike.com',  desc:'15% back at Nike.com (Amex Offer — must activate)' },
+  { id:'lto-4', card:'discover-it',  cat:'shopping', rate:10, end:'2026-06-30', merchant:'Target',    desc:'10% back at Target (Discover Cashback Bonus)' },
+  { id:'lto-5', card:'c1-venturex',  cat:'travel',   rate:12, end:'2026-07-31', merchant:'Airbnb',    desc:'12% back on Airbnb stays (Capital One Travel Offer)' },
+];
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+
+function loadState() {
+  try { return JSON.parse(localStorage.getItem('spendmax-v2')) || {}; } catch { return {}; }
+}
+const S = { w:['citi-dc'], l:[], m:'hybrid', ...loadState() };
+const save = () => localStorage.setItem('spendmax-v2', JSON.stringify(S));
+
+const addCard    = id => { if (!S.w.includes(id)) S.w.push(id); save(); render(); };
+const removeCard = id => { S.w = S.w.filter(x => x !== id); save(); render(); };
+const toggleLto  = id => { S.l.includes(id) ? S.l = S.l.filter(x => x !== id) : S.l.push(id); save(); render(); };
+const setMode    = m  => { S.m = m; save(); render(); };
+
+// ─── RULES ENGINE ────────────────────────────────────────────────────────────
+
+function effectiveRate(card, catId) {
+  const lto = LTOS.find(l => l.card === card.id && l.cat === catId && S.l.includes(l.id));
+  if (lto) return lto.rate;
+  const rot = card.rates.find(r => r.c === catId && r.t === 'r' && r.q && r.q.includes(Q));
+  if (rot) return rot.r;
+  const perm = card.rates.find(r => r.c === catId && r.t === 'p');
+  if (perm) return perm.r;
+  return card.base;
+}
+
+function reason(card, catId, rate, lto) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (lto) return `${rate}% LTO at ${lto.merchant} — ${lto.desc}`;
+  if (card.rates.find(r => r.c === catId && r.t === 'r' && r.q && r.q.includes(Q))) return `${rate}% rotating — active Q${Q} 2026`;
+  if (card.rates.find(r => r.c === catId && r.t === 'p')) return `${rate}% permanent bonus on ${cat?.name ?? catId}`;
+  return `${rate}% base rate`;
+}
+
+function categorySummaries() {
+  const wallet = CARDS.filter(c => S.w.includes(c.id));
+  const outside = CARDS.filter(c => !S.w.includes(c.id));
+  return CATEGORIES.map(cat => {
+    let best = null, bestR = 0;
+    for (const c of wallet) { const r = effectiveRate(c, cat.id); if (r > bestR) { bestR = r; best = c; } }
+    let alert = null, alertR = 0;
+    for (const c of outside) { const r = effectiveRate(c, cat.id); if (r > alertR) { alertR = r; alert = c; } }
+    const hasAlert = alert && alertR > Math.max(bestR, 0.01) * 1.1 && alertR > bestR;
+    return { cat, best, bestR, hasAlert, alertPct: hasAlert ? Math.round((alertR - bestR) / Math.max(bestR, 0.01) * 100) : 0 };
+  });
+}
+
+function categoryRecs(catId) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (!cat) return [];
+  const wallet  = CARDS.filter(c => S.w.includes(c.id));
+  const outside = CARDS.filter(c => !S.w.includes(c.id));
+  const tiers = [];
+
+  const wRated = wallet.map(c => {
+    const lto = LTOS.find(l => l.card === c.id && l.cat === catId && S.l.includes(l.id));
+    return { c, r: effectiveRate(c, catId), lto };
+  }).sort((a,b) => b.r - a.r);
+
+  if (wRated.length) {
+    const top = wRated[0];
+    tiers.push({ tier:1, c:top.c, r:top.r, why:reason(top.c,catId,top.r,top.lto), lto:top.lto, inWallet:true });
+  }
+
+  LTOS.filter(l => l.cat === catId && S.l.includes(l.id) && S.w.includes(l.card) && l.card !== tiers[0]?.c.id)
+    .slice(0,2).forEach(lto => {
+      const c = CARDS.find(x => x.id === lto.card);
+      if (c) tiers.push({ tier:2, c, r:lto.rate, why:`${lto.rate}% LTO at ${lto.merchant} — ${lto.desc}`, lto, inWallet:true });
+    });
+
+  const wBest = wRated[0]?.r ?? 0;
+  const t3 = outside.map(c => ({c, r:effectiveRate(c,catId)})).sort((a,b)=>b.r-a.r).find(x => x.r > wBest*1.1);
+  if (t3) {
+    const uplift = Math.round((t3.r - wBest)/100*SPEND);
+    tiers.push({ tier:3, c:t3.c, r:t3.r, why:`Not in wallet — adding could earn ~$${uplift}/yr more in ${cat.name}`, lto:null, inWallet:false, uplift });
+  }
+  return tiers;
+}
+
+function discoverResults() {
+  return CARDS.filter(c => !S.w.includes(c.id)).map(card => {
+    const uplifts = CATEGORIES.map(cat => {
+      const nr = effectiveRate(card, cat.id);
+      const wb = Math.max(0,...CARDS.filter(c=>S.w.includes(c.id)).map(c=>effectiveRate(c,cat.id)),0);
+      return { cat, u: Math.max(0, nr-wb) };
+    }).filter(x => x.u > 0);
+    const annual = uplifts.reduce((s,x)=>s+Math.round(x.u/100*SPEND),0);
+    const score  = S.m==='purist' ? annual : S.m==='deal-hunter' ? card.bonus+annual*.5 : annual*.7+card.bonus*.3;
+    return { card, uplifts, annual, score, promoted:false };
+  }).sort((a,b)=>b.score-a.score).map((r,_,arr)=>{
+    if (S.m==='hybrid' && r.card.promoted && r.card.id!==arr[0].card.id)
+      r.promoted = r.annual >= arr[0].annual*.95;
+    return r;
+  });
+}
+
+function stats() {
+  const s = categorySummaries();
+  return { annual: s.reduce((t,x)=>t+Math.round(x.bestR/100*SPEND),0), alerts: s.filter(x=>x.hasAlert).length };
+}
+
+// ─── ROUTER ──────────────────────────────────────────────────────────────────
+
+let route = location.hash.replace('#','');
+const go = r => { route = r; location.hash = r ? '#'+r : '#'; render(); };
+window.addEventListener('hashchange', () => { route = location.hash.replace('#',''); render(); });
+
+// ─── HTML TEMPLATES ──────────────────────────────────────────────────────────
+
+const cardRect = (color, w='w-7', h='h-4') =>
+  `<div class="${w} ${h} rounded" style="background:${color}"></div>`;
+
+function pageDashboard() {
+  const st = stats();
+  const sums = categorySummaries();
+  const tilesHTML = sums.map(s => `
+    <div onclick="go('category/${s.cat.id}')" class="relative rounded-2xl p-5 bg-slate-800 border cursor-pointer tile-hover
+      ${s.hasAlert ? 'border-orange-400 glow-orange' : 'border-slate-700 hover:border-slate-500'}">
+      ${s.hasAlert ? `<div class="absolute top-3 right-3 bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">+${s.alertPct}% uplift</div>` : ''}
+      <div class="text-3xl mb-3">${s.cat.icon}</div>
+      <div class="text-slate-300 text-sm font-medium mb-3">${s.cat.name}</div>
+      ${s.best
+        ? `<div class="flex items-center gap-2 mb-1">${cardRect(s.best.color)}<span class="text-xs text-slate-500">${s.best.issuer} ${s.best.name}</span></div>
+           <div class="text-2xl font-bold text-white">${s.bestR}%</div>`
+        : `<div class="text-slate-600 text-sm italic">No card in wallet</div>`}
+    </div>`).join('');
+
+  return `<div class="space-y-8">
+    <div><h1 class="text-3xl font-bold">Dashboard</h1><p class="text-slate-400 mt-1 text-sm">Your rewards at a glance — Q2 2026</p></div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700">
+        <div class="text-slate-400 text-xs uppercase tracking-widest mb-1">Est. Annual Rewards</div>
+        <div class="text-3xl font-bold text-green-400">$${st.annual.toLocaleString()}</div>
+        <div class="text-slate-600 text-xs mt-1">Based on $5k/category/yr</div>
+      </div>
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700">
+        <div class="text-slate-400 text-xs uppercase tracking-widest mb-1">Cards in Wallet</div>
+        <div class="text-3xl font-bold text-blue-400">${S.w.length}</div>
+        <span onclick="go('wallet')" class="text-slate-500 text-xs hover:text-blue-400 cursor-pointer">Manage wallet →</span>
+      </div>
+      <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700">
+        <div class="text-slate-400 text-xs uppercase tracking-widest mb-1">Optimization Alerts</div>
+        <div class="text-3xl font-bold ${st.alerts ? 'text-orange-400' : 'text-green-400'}">${st.alerts}</div>
+        <div class="text-slate-600 text-xs mt-1">${st.alerts ? 'Categories could earn more' : 'Fully optimized'}</div>
+      </div>
+    </div>
+    <div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Spending Categories</h2>
+        <span class="text-xs text-orange-400 bg-orange-400/10 border border-orange-400/20 px-3 py-1 rounded-full">Glowing border = uplift available</span>
+      </div>
+      ${S.w.length === 0
+        ? `<div class="bg-slate-800 border border-slate-700 rounded-2xl p-10 text-center">
+            <div class="text-5xl mb-4">💳</div>
+            <div class="text-white font-semibold text-lg mb-2">Your wallet is empty</div>
+            <div class="text-slate-400 text-sm mb-5">Add your cards to see personalized recommendations</div>
+            <button onclick="go('wallet')" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors">Add Cards →</button>
+          </div>`
+        : `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">${tilesHTML}</div>`}
+    </div>
+    <div class="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4 flex items-center gap-3">
+      <span class="text-blue-400 text-lg">📅</span>
+      <div class="text-sm"><span class="text-slate-300 font-medium">Q2 2026 rotating categories active — </span>
+      <span class="text-slate-500">Chase Freedom Flex: 5% Groceries &amp; Online Shopping · Discover it: 5% Dining</span></div>
+    </div>
+  </div>`;
+}
+
+function pageCategory(catId) {
+  const cat = CATEGORIES.find(c => c.id === catId);
+  if (!cat) return `<div class="text-red-400">Category not found</div>`;
+  const recs = categoryRecs(catId);
+  const catLTOs = LTOS.filter(l => l.cat === catId);
+  const M = {
+    1:{ label:'Best Match',      border:'border-blue-500',   bg:'bg-blue-500/10',   badge:'bg-blue-500' },
+    2:{ label:'LTO Special',     border:'border-orange-400', bg:'bg-orange-400/10', badge:'bg-orange-400' },
+    3:{ label:'Consider Adding', border:'border-purple-500', bg:'bg-purple-500/10', badge:'bg-purple-500' },
+  };
+  const recsHTML = recs.length === 0
+    ? `<div class="bg-slate-800 border border-slate-700 rounded-2xl p-10 text-center">
+        <div class="text-4xl mb-3">💳</div>
+        <div class="text-slate-300 font-medium mb-4">Add cards to your wallet to get recommendations</div>
+        <button onclick="go('wallet')" class="text-blue-400 hover:underline text-sm">Add cards →</button>
+      </div>`
+    : recs.map(r => `
+      <div class="rounded-2xl border p-5 ${M[r.tier].border} ${M[r.tier].bg}">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-white text-xs font-bold px-2.5 py-1 rounded-full ${M[r.tier].badge}">Tier ${r.tier} — ${M[r.tier].label}</span>
+            ${!r.inWallet ? `<span class="text-xs text-purple-300 bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded-full">Not in wallet</span>` : ''}
+            ${r.lto ? `<span class="text-xs text-orange-300 bg-orange-500/20 border border-orange-500/30 px-2 py-0.5 rounded-full">🎯 ${r.lto.merchant}</span>` : ''}
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-2xl font-bold text-white">${r.r}%</div>
+            ${r.uplift ? `<div class="text-xs text-green-400 font-medium">+$${r.uplift}/yr</div>` : ''}
+          </div>
+        </div>
+        <div class="mt-4 flex items-center gap-3">
+          ${cardRect(r.c.color,'w-10','h-6')}
+          <div>
+            <div class="text-white font-semibold">${r.c.issuer} ${r.c.name}</div>
+            <div class="text-slate-400 text-sm mt-0.5">${r.why}</div>
+          </div>
+        </div>
+      </div>`).join('');
+
+  const ltosHTML = catLTOs.length === 0 ? '' : `
+    <div>
+      <h2 class="text-lg font-semibold mb-3">Limited-Time Offers in This Category</h2>
+      <div class="space-y-3">${catLTOs.map(lto => {
+        const act = S.l.includes(lto.id);
+        const exp = new Date(lto.end);
+        const expired = exp < new Date();
+        const days = Math.max(0, Math.ceil((exp-Date.now())/86400000));
+        return `<div class="bg-slate-800 border rounded-2xl p-4 flex items-center justify-between gap-4 ${expired?'opacity-40 border-slate-800':act?'border-green-500/50':'border-slate-700'}">
+          <div class="flex-1 min-w-0">
+            <div class="text-white font-medium text-sm">${lto.desc}</div>
+            <div class="flex items-center gap-3 mt-1">
+              <span class="text-orange-400 font-bold">${lto.rate}% back</span>
+              <span class="text-slate-500 text-xs">${expired?'⚠ Expired':`${days}d left`}</span>
+            </div>
+          </div>
+          <button ${expired?'disabled':''} onclick="${expired?'':(`toggleLto('${lto.id}')`)}"
+            class="shrink-0 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${expired?'opacity-50 cursor-not-allowed':''} ${act?'bg-green-600 text-white':'bg-slate-700 text-slate-300 hover:bg-slate-600'}">
+            ${act?'✓ Activated':'Activate'}
+          </button>
+        </div>`;}).join('')}
+      </div>
+    </div>`;
+
+  return `<div class="space-y-7">
+    <span onclick="go('')" class="text-slate-500 hover:text-slate-300 text-sm cursor-pointer">← Dashboard</span>
+    <div class="flex items-center gap-4">
+      <span class="text-5xl">${cat.icon}</span>
+      <div><h1 class="text-2xl font-bold">${cat.name}</h1><p class="text-slate-400 text-sm mt-0.5">Multi-tier recommendation breakdown</p></div>
+    </div>
+    <div class="space-y-4">${recsHTML}</div>
+    ${ltosHTML}
+  </div>`;
+}
+
+function pageDiscover() {
+  const MODES = [
+    { v:'purist',      label:'The Purist',      desc:'Ranked purely by ROI uplift',              icon:'📊' },
+    { v:'hybrid',      label:'The Hybrid',       desc:'Best value + promoted alternatives',        icon:'⚖️' },
+    { v:'deal-hunter', label:'The Deal Hunter',  desc:'Prioritizes sign-up bonuses',              icon:'🎯' },
+  ];
+  const results = discoverResults();
+  const modesHTML = MODES.map(m=>`
+    <button onclick="setMode('${m.v}')" class="p-4 rounded-xl border text-left transition-all
+      ${S.m===m.v?'border-blue-500 bg-blue-500/15 glow-blue':'border-slate-700 hover:border-slate-500 bg-slate-800/50'}">
+      <div class="text-xl mb-2">${m.icon}</div>
+      <div class="font-semibold text-sm ${S.m===m.v?'text-white':'text-slate-300'}">${m.label}</div>
+      <div class="text-slate-500 text-xs mt-1">${m.desc}</div>
+    </button>`).join('');
+
+  const resultsHTML = results.length===0
+    ? `<div class="text-center py-16"><div class="text-5xl mb-4">🎉</div><div class="font-semibold text-lg">Wallet complete!</div></div>`
+    : results.map((r,i)=>`
+      <div class="bg-slate-800 rounded-2xl border p-5 ${r.promoted?'border-amber-500 glow-amber':'border-slate-700'}">
+        ${r.promoted?`<div class="text-xs text-amber-400 font-semibold mb-3">⭐ Promoted Alternative — within 5% of top performer</div>`:''}
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <div class="text-slate-500 font-mono text-sm w-5">#${i+1}</div>
+            ${cardRect(r.card.color,'w-12','h-7')}
+            <div>
+              <div class="text-white font-semibold">${r.card.issuer} ${r.card.name}</div>
+              <div class="text-slate-500 text-xs mt-0.5">$${r.card.fee}/yr annual fee · $${r.card.bonus} signup bonus</div>
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-green-400 font-bold text-xl">+$${r.annual.toLocaleString()}/yr</div>
+            <div class="text-slate-500 text-xs">est. uplift</div>
+          </div>
+        </div>
+        ${r.uplifts.length?`<div class="mt-4 flex flex-wrap gap-2">${r.uplifts.map(u=>`<span class="text-xs bg-slate-700 text-slate-300 border border-slate-600 px-2.5 py-1 rounded-full">+${u.u.toFixed(1)}% ${u.cat.name}</span>`).join('')}</div>`:''}
+        <div class="mt-4">
+          <button onclick="addCard('${r.card.id}')" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">Add to Wallet</button>
+        </div>
+      </div>`).join('');
+
+  return `<div class="space-y-7">
+    <div><h1 class="text-3xl font-bold">Card Discovery</h1><p class="text-slate-400 mt-1 text-sm">Cards outside your wallet ranked by estimated annual uplift</p></div>
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5">
+      <div class="text-slate-400 text-xs uppercase tracking-widest mb-3">Recommendation Mode</div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">${modesHTML}</div>
+      ${S.m==='hybrid'?`<div class="mt-3 text-xs text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-3 py-2">⭐ Hybrid mode may show a promoted alternative when it's within 5% of the top performer</div>`:''}
+    </div>
+    <div class="space-y-4">${resultsHTML}</div>
+  </div>`;
+}
+
+function pageWallet() {
+  const walletCards   = CARDS.filter(c =>  S.w.includes(c.id));
+  const availableCards= CARDS.filter(c => !S.w.includes(c.id));
+
+  const ownedHTML = walletCards.length===0
+    ? `<div class="text-slate-500 text-sm py-4 italic">No cards yet.</div>`
+    : `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${walletCards.map(c=>`
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">${cardRect(c.color,'w-12','h-7')}
+            <div>
+              <div class="text-white font-medium text-sm">${c.issuer} ${c.name}</div>
+              <div class="text-slate-500 text-xs">$${c.fee}/yr · ${c.base}% base</div>
+            </div>
+          </div>
+          <button onclick="removeCard('${c.id}')" class="text-slate-600 hover:text-red-400 text-xs font-medium transition-colors ml-2">Remove</button>
+        </div>`).join('')}</div>`;
+
+  const ltosHTML = LTOS.map(lto => {
+    const c = CARDS.find(x=>x.id===lto.card);
+    if (!c) return '';
+    const act = S.l.includes(lto.id);
+    const exp = new Date(lto.end);
+    const expired = exp < new Date();
+    const days = Math.max(0,Math.ceil((exp-Date.now())/86400000));
+    return `<div class="bg-slate-800 border rounded-2xl p-4 flex items-center justify-between gap-4 ${expired?'opacity-40 border-slate-800':act?'border-green-500/40':'border-slate-700'}">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-1">${cardRect(c.color,'w-6','h-4')}
+          <span class="text-white text-sm font-medium">${lto.desc}</span></div>
+        <div class="flex items-center gap-3">
+          <span class="text-orange-400 font-bold text-sm">${lto.rate}% back</span>
+          <span class="text-slate-500 text-xs">${expired?'⚠ Expired':`Expires ${exp.toLocaleDateString('en-US',{month:'short',day:'numeric'})} · ${days}d left`}</span>
+        </div>
+      </div>
+      <button ${expired?'disabled':''} onclick="${expired?'':(`toggleLto('${lto.id}')`)}"
+        class="shrink-0 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${expired?'opacity-50 cursor-not-allowed':''} ${act?'bg-green-600 text-white':'bg-slate-700 text-slate-300 hover:bg-slate-600'}">
+        ${act?'✓ Activated':'Activate'}
+      </button>
+    </div>`;
+  }).join('');
+
+  const availHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${availableCards.map(c=>`
+    <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">${cardRect(c.color,'w-12','h-7')}
+        <div>
+          <div class="text-slate-300 font-medium text-sm">${c.issuer} ${c.name}</div>
+          <div class="text-slate-500 text-xs">$${c.fee}/yr · $${c.bonus} bonus</div>
+        </div>
+      </div>
+      <button onclick="addCard('${c.id}')" class="bg-blue-600/20 text-blue-400 border border-blue-600/30 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 ml-2">Add</button>
+    </div>`).join('')}</div>`;
+
+  return `<div class="space-y-8">
+    <h1 class="text-3xl font-bold">My Wallet</h1>
+    <div>
+      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-3">Your Cards (${walletCards.length})</h2>
+      ${ownedHTML}
+    </div>
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest">Sync Offers</h2>
+        <button id="sync-btn" onclick="const b=document.getElementById('sync-btn');b.textContent='✓ Refreshed';setTimeout(()=>b.textContent='↻ Sync Offers',1500)"
+          class="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-600 bg-slate-800 text-slate-400 hover:text-white hover:border-slate-500 transition-all">↻ Sync Offers</button>
+      </div>
+      <div class="space-y-3">${ltosHTML}</div>
+    </div>
+    <div>
+      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-widest mb-3">Available Cards (${availableCards.length})</h2>
+      ${availHTML}
+    </div>
+  </div>`;
+}
+
+// ─── RENDER ──────────────────────────────────────────────────────────────────
+
+function render() {
+  let html = '';
+  if (route.startsWith('category/')) html = pageCategory(route.replace('category/',''));
+  else if (route==='discover')       html = pageDiscover();
+  else if (route==='wallet')         html = pageWallet();
+  else                               html = pageDashboard();
+  document.getElementById('app').innerHTML = html;
+
+  // Update nav active states
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    const r = btn.dataset.route;
+    const active =
+      (r===''        && (route==='' || route==='/' || route.startsWith('category/'))) ||
+      (r==='wallet'  && route==='wallet')  ||
+      (r==='discover'&& route==='discover');
+    btn.className = `nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors ${active?'bg-blue-600 text-white':'text-slate-400 hover:text-white hover:bg-slate-800'}`;
+  });
+}
+
+// Attach nav button listeners
+document.querySelectorAll('.nav-btn').forEach(btn => btn.addEventListener('click', () => go(btn.dataset.route)));
+
+render();
+</script>
+</body>
+</html>
