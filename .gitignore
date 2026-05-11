@@ -1,0 +1,10 @@
+node_modules/
+.vercel
+.DS_Store
+.claude/
+.claude-flow/
+client/.env.local
+client/tsconfig.tsbuildinfo
+client/.next/
+server/dist/
+*.log
